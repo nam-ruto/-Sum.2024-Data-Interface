@@ -49,6 +49,10 @@ class DataInterface:
     def to_csv(self, data, file_path):
         with open(file=file_path, mode='w', newline='') as file:
             file.write(data)
+    
+    def close(self):
+        if self.connect:
+            self.connect.close()
 
 class csv(DataInterface):
     def __init__(self, db_type, connection_params=None):
