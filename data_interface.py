@@ -1,15 +1,18 @@
 import os
+import json
 import pyodbc
 import pymysql
 import logging
 import pandas as pd
+from sqlalchemy import create_engine 
 from dotenv import find_dotenv, load_dotenv
 from log_config import AzureTableStorageHandler
 from azure.storage.blob import BlobServiceClient
 from azure.identity import DefaultAzureCredential
-from office365.sharepoint.listitems.caml import query
-from office365.sharepoint.client_context import ClientContext
-from office365.runtime.auth.authentication_context import AuthenticationContext
+from office365.sharepoint.request import SharePointRequest
+from office365.sharepoint.client_context import ClientCredential
+from office365.runtime.auth.user_credential import UserCredential
+
 
 # Config logging - Logs will be written into Azure Table Storage
 path = find_dotenv()
@@ -22,6 +25,7 @@ azure_handler = AzureTableStorageHandler(connection_string=CONNECTION_STRING, ta
 logger.addHandler(azure_handler) # Log into Azure Table
 logger.addHandler(logging.StreamHandler()) # Log into command-line console
 # logging.basicConfig(level=logging.INFO)
+
 
 class DataInterface:
     def __init__(self, db_type, connection_params=None):
@@ -43,8 +47,11 @@ class DataInterface:
         df = pd.DataFrame(data=data, columns=columns_header)
         return df, rows
 
-    def write():
-        pass
+    def write_to_database(connection_string=None, data_frame:pd.DataFrame= None, table_name=None):
+        engine = create_engine(connection_string)
+        print(connection_string)
+        data_frame.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
+        logger.info(f"Data written to MySQL table '{table_name}' successfully.")
 
     def to_csv(self, data, file_path):
         with open(file=file_path, mode='w', newline='') as file:
@@ -114,7 +121,7 @@ class sql_server(DataInterface):
         cursor.executemany(query, data)
         logger.info(f"Insert Data Successfully")
         self.connect.commit()
-
+    
 class Blob(DataInterface):
     def __init__(self, container_name, blob_name):
         self.container_name = container_name
@@ -160,70 +167,79 @@ class Blob(DataInterface):
             blob_client.upload_blob(data=data)
 
 class SharePoint(DataInterface):
-    def __init__(self, user_name=None, password=None, site_url=None, client_id=None, tenant_id=None, client_secret=None):
+    def __init__(self, request=None, user_name=None, password=None, site_url=None, base_url=None, client_id=None, tenant_id=None, client_secret=None):
+        self.request = request
         self.user_name = user_name
         self.password = password
         self.site_url = site_url
+        self.base_url = base_url
         self.client_id = client_id
         self.tenant_id = tenant_id
         self.client_secret = client_secret
-        self.context = None
+
+    # Service Principle Authentication
+    def client_authenticate(self):
+        try:
+            self.request = SharePointRequest(self.site_url).with_credentials(ClientCredential(client_id=self.client_id, client_secret=self.client_secret))
+            test_response = self.request.execute_request("web")
+            if test_response.status_code == 200:
+                logger.info("Authenticated using user credentials.")
+            else:
+                logger.error(f"Authentication failed using user credentials. Status code: {test_response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to authenticate using user credentials: {e}") 
+
+    # User Credentials Authentication
+    def user_authenticate(self):
+        try:
+            self.request = SharePointRequest(self.site_url).with_credentials(UserCredential(self.user_name, self.password))
+            # Perform a test request to verify authentication
+            test_response = self.request.execute_request("web")
+            if test_response.status_code == 200:
+                logger.info("Authenticated using user credentials.")
+            else:
+                logger.error(f"Authentication failed using user credentials. Status code: {test_response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to authenticate using user credentials: {e}")
+
+    # Get list data with the internal columns --> Return a list of dictionary
+    def get_list_item(self, list_name, select_query):
+        all_data = []
+        endpoint = f"web/lists/getbytitle('{list_name}')/items?{select_query}"
+        while endpoint:
+            response = self.request.execute_request(endpoint)
+            data = json.loads(response.content)
+            data = response.json()
+            all_data.extend(data['d']['results'])
+            next_page = data['d'].get('__next')
+            if next_page:
+                # Ensure the next page URL is correctly formatted
+                endpoint = next_page.replace(self.base_url, "")
+            else:
+                endpoint = None
+        return all_data
+
+    # Get external name (display name) of column --> Return a dictionary
+    def get_field_metadata(self, list_name=None, field_names: list = None):
+        fields_metadata = {} # Contain pair of key: value (internal name: external name)
+
+        field_filters = ' or '.join([f"InternalName eq '{field}'" for field in field_names])
+        endpoint = f"web/lists/getbytitle('{list_name}')/fields?$filter={field_filters}"
+        response = self.request.execute_request(endpoint)
+        data = json.loads(response.content)
+        data = response.json()
+        fields = data['d']['results']
+        for field in fields:
+            if field_names is None or field['InternalName'] in field_names:
+                fields_metadata[field['InternalName']] = field['Title']
+        return fields_metadata
     
-    def app_only_auth():
-        pass
-
-    def user_delegation_auth():
-        pass
-
-    def user_cre_auth(self):
-        ctx_auth = AuthenticationContext(self.site_url)
-        if ctx_auth.acquire_token_for_user(username=self.user_name, password=self.password):
-            logger.info("Authenticate successfully")
-            self.context = ClientContext(base_url=self.site_url, auth_context=ctx_auth)
-        else:
-            logger.error(ctx_auth.get_last_error())
-    
-    def get_site_title(self):
-        web = self.context.web
-        self.context.load(web)
-        self.context.execute_query()
-        print(f"Site title: {web.properties['Title']}")
-    
-    def get_list_data(self, list_title):
-        # Retrieve Web Properties
-        web = self.context.web
-
-        # Retrieve specific list
-        sp_list = web.lists.get_by_title(list_title=list_title)
-        self.context.load(sp_list)
-        self.context.execute_query()
-        print(f"List title: {sp_list.properties['Title']}")
-
-        # Retrieve list's field
-        fields = sp_list.fields
-        self.context.load(fields)
-        self.context.execute_query()
-        field_mapping = {field.properties['InternalName']: field.properties['Title'] for field in fields}
-
-        # Retrieve list's data
-        caml_query = query.CamlQuery(view_xml=True)
-        caml_query.ViewXml = "<View><Query></Query></View>"
-        items = sp_list.get_items(caml_query) # It will return dictionaries with internal column and correspond data
-        self.context.load(items)
-        self.context.execute_query()
-
-        data = []
-        for item in items:
-            data.append(item.properties)
-        df = pd.DataFrame(data=data)
-        selected_columns = ['Title'] + [col for col in df.columns if col.startswith('field_')] # Take only necessary column
-        self.data_frame = df[selected_columns].copy()
-        self.data_frame.rename(columns=field_mapping, inplace=True) # Remove internal column name with its actual name
-
-        # Convert to dataframe to tuple
-        final_data = tuple(tuple(row) for row in self.data_frame.itertuples(index=False, name=None))
-
-        return self.data_frame, final_data
-    
-    def to_csv(self, file_path):
-        self.data_frame.to_csv(file_path=file_path, index=False)
+    # Mapping data with the external name (Display Name)
+    def mapping(self, data: list, field_metadata: dict):
+        transformed_data = []
+        for item in data:
+            transformed_item = {}
+            for internal, external in field_metadata.items():
+                transformed_item[external] = item.get(internal, None) 
+            transformed_data.append(transformed_item)
+        return transformed_data
