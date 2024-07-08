@@ -1,5 +1,7 @@
 # .gitignore
 venv/
 .env
+main.sh
 main.py
 test.py
+back_up

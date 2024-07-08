@@ -23,7 +23,7 @@ class AzureTableStorageHandler(logging.Handler):
                 return
             log_entry = self.format(record)
             entity = {
-                'PartitionKey': 'log',
+                'PartitionKey': record.levelname,
                 'RowKey': f"{record.created}-{record.levelname}-{record.name}",
                 'LogLevel': record.levelname,
                 'Message': record.getMessage(),  # Use getMessage() to get the formatted message

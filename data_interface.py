@@ -18,10 +18,10 @@ from office365.runtime.auth.user_credential import UserCredential
 path = find_dotenv()
 load_dotenv(path)
 CONNECTION_STRING = os.getenv("CONNECTION_STRING")
-TABLE_NAME = os.getenv("TABLE_NAME")
+AZURE_TABLE_NAME = os.getenv("TABLE_NAME")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-azure_handler = AzureTableStorageHandler(connection_string=CONNECTION_STRING, table_name=TABLE_NAME)
+azure_handler = AzureTableStorageHandler(connection_string=CONNECTION_STRING, table_name=AZURE_TABLE_NAME)
 logger.addHandler(azure_handler) # Log into Azure Table
 logger.addHandler(logging.StreamHandler()) # Log into command-line console
 # logging.basicConfig(level=logging.INFO)
@@ -38,7 +38,7 @@ class DataInterface:
         pass
 
     # Common method for MySQL and SQL Server 
-    def read(self, query, columns_header):
+    def read(self, query=None, columns_header=None):
         cursor = self.connect.cursor()
         logger.info(f"Executing: {query}")
         cursor.execute(query)
@@ -47,11 +47,11 @@ class DataInterface:
         df = pd.DataFrame(data=data, columns=columns_header)
         return df, rows
 
-    def write_to_database(connection_string=None, data_frame:pd.DataFrame= None, table_name=None):
-        engine = create_engine(connection_string)
-        print(connection_string)
-        data_frame.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
-        logger.info(f"Data written to MySQL table '{table_name}' successfully.")
+    def write_to_database(self, conn_string=None, data=None, list_name=None):
+        engine = create_engine(conn_string)
+        con = engine.connect()
+        data.to_sql(name=list_name, con=con, if_exists='replace', index=False)
+        logger.info(f"Data written to MySQL table '{list_name}' successfully.")
 
     def to_csv(self, data, file_path):
         with open(file=file_path, mode='w', newline='') as file:
@@ -123,7 +123,7 @@ class sql_server(DataInterface):
         self.connect.commit()
     
 class Blob(DataInterface):
-    def __init__(self, container_name, blob_name):
+    def __init__(self, container_name=None, blob_name=None):
         self.container_name = container_name
         self.blob_name = blob_name
         self.blob_service_client = None
@@ -165,6 +165,7 @@ class Blob(DataInterface):
         blob_client = self.blob_service_client.get_blob_client(container=container_name, blob=blob_name)
         with open(file=file_path, mode="rb") as data:
             blob_client.upload_blob(data=data)
+            logger.info("Upload blob successfully")
 
 class SharePoint(DataInterface):
     def __init__(self, request=None, user_name=None, password=None, site_url=None, base_url=None, client_id=None, tenant_id=None, client_secret=None):
@@ -183,7 +184,7 @@ class SharePoint(DataInterface):
             self.request = SharePointRequest(self.site_url).with_credentials(ClientCredential(client_id=self.client_id, client_secret=self.client_secret))
             test_response = self.request.execute_request("web")
             if test_response.status_code == 200:
-                logger.info("Authenticated using user credentials.")
+                logger.info("Authenticated using user credentials successfully.")
             else:
                 logger.error(f"Authentication failed using user credentials. Status code: {test_response.status_code}")
         except Exception as e:
@@ -196,7 +197,7 @@ class SharePoint(DataInterface):
             # Perform a test request to verify authentication
             test_response = self.request.execute_request("web")
             if test_response.status_code == 200:
-                logger.info("Authenticated using user credentials.")
+                logger.info("Authenticated using user credentials successfully.")
             else:
                 logger.error(f"Authentication failed using user credentials. Status code: {test_response.status_code}")
         except Exception as e:
