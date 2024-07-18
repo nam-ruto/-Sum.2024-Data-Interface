@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 from data_interface import DataInterface
 from dotenv import find_dotenv, load_dotenv
-from log_config import AzureTableStorageHandler
+from log.log_config import AzureTableStorageHandler
 
 
 

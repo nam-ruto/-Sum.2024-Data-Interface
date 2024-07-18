@@ -5,7 +5,7 @@ from data_interface import DataInterface
 from dotenv import find_dotenv, load_dotenv
 from azure.storage.blob import BlobServiceClient
 from azure.identity import DefaultAzureCredential
-from log_config import AzureTableStorageHandler
+from log.log_config import AzureTableStorageHandler
 
 
 path = find_dotenv()

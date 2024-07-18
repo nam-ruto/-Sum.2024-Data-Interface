@@ -7,7 +7,7 @@ from dotenv import find_dotenv, load_dotenv
 from office365.sharepoint.request import SharePointRequest
 from office365.sharepoint.client_context import ClientCredential
 from office365.runtime.auth.user_credential import UserCredential
-from log_config import AzureTableStorageHandler
+from log.log_config import AzureTableStorageHandler
 
 
 path = find_dotenv()
